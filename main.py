@@ -11,6 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pytz
 
+# 嘗試 import scraper
+try:
+    from scraper_handicap import scrape_handicap
+    SCRAPER_AVAILABLE = True
+except ImportError:
+    SCRAPER_AVAILABLE = False
+
 # 設定時區
 HKT = pytz.timezone('Asia/Hong_Kong')
 
@@ -52,10 +59,52 @@ class Recommendation(BaseModel):
     potential_return: float
     reason: str
 
-# ============ 模擬數據 ============
+# ============ 模擬數據 + 真實爬蟲 ============
+
+# Cache for scraped data
+_cached_matches = None
+_cache_time = None
+CACHE_DURATION = 300  # 5 minutes
+
+
+def get_real_matches() -> List[Match]:
+    """從 HKJC 獲取真實數據"""
+    global _cached_matches, _cache_time
+    
+    now = datetime.now()
+    
+    # Check cache
+    if _cached_matches and _cache_time:
+        if (now - _cache_time).seconds < CACHE_DURATION:
+            print(f"📦 使用快取數據 (age: {(now - _cache_time).seconds}s)")
+            return _cached_matches
+    
+    # Try to scrape
+    if SCRAPER_AVAILABLE:
+        try:
+            print("🔄 正在從 HKJC 獲取數據...")
+            scraped = scrape_handicap()
+            
+            if scraped:
+                _cached_matches = [Match(**m) for m in scraped]
+                _cache_time = now
+                print(f"✅ 成功獲取 {len(_cached_matches)} 場賽事")
+                return _cached_matches
+        except Exception as e:
+            print(f"❌ 爬蟲錯誤: {e}")
+    
+    return None
+
 
 def get_mock_matches() -> List[Match]:
     """產生模擬數據用於測試"""
+    
+    # 先嘗試獲取真實數據
+    real_matches = get_real_matches()
+    if real_matches:
+        return real_matches
+    
+    # Fallback to mock data
     now = datetime.now(HKT)
     
     mock_matches = [
